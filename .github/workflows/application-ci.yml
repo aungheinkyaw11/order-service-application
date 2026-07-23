@@ -3,13 +3,11 @@ name: Application CI
 on:
   pull_request:
     paths:
-      - "application/**"
       - ".github/workflows/application-ci.yml"
   push:
     branches:
       - main
     paths:
-      - "application/**"
       - ".github/workflows/application-ci.yml"
   workflow_dispatch:
 
@@ -39,15 +37,15 @@ jobs:
           persist-credentials: false
 
       - name: Build test image
-        run: docker build --target development --tag order-service-test:${GITHUB_SHA} application
+        run: docker build --target development --tag order-service-test:${GITHUB_SHA} .
 
       - name: Check lint and formatting
         run: |
-          docker run --rm --volume "${GITHUB_WORKSPACE}/application:/src" --workdir /src order-service-test:${GITHUB_SHA} ruff check .
-          docker run --rm --volume "${GITHUB_WORKSPACE}/application:/src" --workdir /src order-service-test:${GITHUB_SHA} ruff format --check .
+          docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} ruff check .
+          docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} ruff format --check .
 
       - name: Run unit tests
-        run: docker run --rm --volume "${GITHUB_WORKSPACE}/application:/src" --workdir /src order-service-test:${GITHUB_SHA} pytest -q -p no:cacheprovider tests
+        run: docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} pytest -q -p no:cacheprovider tests
 
   publish:
     name: Build and push development image
@@ -95,7 +93,7 @@ jobs:
         if: steps.image.outputs.sha_exists != 'true'
         env:
           IMAGE_URI: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-        run: docker build --build-arg IMAGE_VERSION="${GITHUB_SHA}" --tag "${IMAGE_URI}" application
+        run: docker build --build-arg IMAGE_VERSION="${GITHUB_SHA}" --tag "${IMAGE_URI}" .
 
       - name: Push image
         if: steps.image.outputs.sha_exists != 'true'
