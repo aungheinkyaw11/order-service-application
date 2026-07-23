@@ -2,13 +2,9 @@ name: Application CI
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/application-ci.yml"
   push:
     branches:
       - main
-    paths:
-      - ".github/workflows/application-ci.yml"
   workflow_dispatch:
 
 concurrency:
