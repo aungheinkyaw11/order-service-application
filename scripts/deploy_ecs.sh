@@ -130,7 +130,7 @@ verify_running_task "${WORKER_SERVICE}" "${worker_task}"
 echo "Deployment complete: ${IMAGE_URI}"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
-    echo "### ECS development deployment"
+    echo "### ECS ${DEPLOY_ENV:-unknown} deployment"
     echo "- Image: \`${IMAGE_URI}\`"
     echo "- API task: \`${api_task}\`"
     echo "- Worker task: \`${worker_task}\`"

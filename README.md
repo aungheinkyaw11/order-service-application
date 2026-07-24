@@ -68,17 +68,40 @@ make lint
 make format
 ```
 
-## Development delivery
+Run an existing ECS migration task manually without exporting resource names:
 
-A push to `main` runs tests, builds one image tagged with the full Git commit SHA, and pushes it to
-ECR. The `deploy-dev` job then registers new migration, API, and worker task definitions using that
-exact image. It runs the migration first and requires exit code `0`, updates both ECS services, waits
-for them to become stable, and confirms that their running tasks use the new revisions.
+```sh
+./scripts/run_migration.sh dev aunghein
+./scripts/run_migration.sh prod aunghein
+```
+
+The first argument selects the environment. The optional second argument is the local AWS CLI
+profile; omit it when the default AWS credentials are already configured.
+
+## Delivery branches
+
+Feature branches are merged into `develop` through a pull request. Pull requests run linting and
+tests but do not publish an image or deploy. A push to `develop` publishes the full Git commit SHA
+to the development ECR repository and automatically deploys the dev ECS services.
+
+Production changes move from `develop` to `main` through a reviewed pull request. A push to `main`
+runs the tests and then pauses at the protected GitHub `prod` environment. After a required reviewer
+approves the job, GitHub assumes the production OIDC role, publishes the exact commit image to the
+production ECR repository, runs the migration, and deploys the production worker and API services.
+
+```text
+feature/* -> pull request -> develop -> automatic dev deployment
+develop   -> pull request -> main    -> approval -> production deployment
+```
+
+Configure repository variables `AWS_DEV_ROLE_ARN` and `AWS_PROD_ROLE_ARN`. Create a GitHub
+environment named `prod` and add a required reviewer. Protect `main` so changes require an approved
+pull request and passing CI checks.
 
 ECS uses rolling deployments and the Terraform-managed deployment circuit breaker. If new tasks
 cannot become healthy, ECS rolls back to the last successful revision and the workflow fails. The
 deployment script is `scripts/deploy_ecs.sh`; resource names are visible in the workflow, while AWS
-access uses the `AWS_DEV_ROLE_ARN` GitHub variable and OIDC instead of stored AWS keys.
+access uses the environment-specific GitHub role variables and OIDC instead of stored AWS keys.
 
 Dependencies are fully pinned in `requirements.txt` and `requirements-dev.txt`. The SQL migration
 runner records applied files in `schema_migrations`; Compose completes migrations before starting
