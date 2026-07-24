@@ -30,4 +30,3 @@ printf '%s' "$final" | python -c \
 
 printf '\ncorrelated logs:\n'
 docker compose logs api worker | grep "$request_id"
-

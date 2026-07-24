@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
 
       - name: Build test image
-        run: docker build --target development --tag order-service-test:${GITHUB_SHA} .
+        run: docker build -t development -t order-service-test:${GITHUB_SHA} .
 
       - name: Check lint and formatting
         run: |
