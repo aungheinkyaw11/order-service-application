@@ -68,6 +68,18 @@ make lint
 make format
 ```
 
+## Development delivery
+
+A push to `main` runs tests, builds one image tagged with the full Git commit SHA, and pushes it to
+ECR. The `deploy-dev` job then registers new migration, API, and worker task definitions using that
+exact image. It runs the migration first and requires exit code `0`, updates both ECS services, waits
+for them to become stable, and confirms that their running tasks use the new revisions.
+
+ECS uses rolling deployments and the Terraform-managed deployment circuit breaker. If new tasks
+cannot become healthy, ECS rolls back to the last successful revision and the workflow fails. The
+deployment script is `scripts/deploy_ecs.sh`; resource names are visible in the workflow, while AWS
+access uses the `AWS_DEV_ROLE_ARN` GitHub variable and OIDC instead of stored AWS keys.
+
 Dependencies are fully pinned in `requirements.txt` and `requirements-dev.txt`. The SQL migration
 runner records applied files in `schema_migrations`; Compose completes migrations before starting
 the API and worker.
