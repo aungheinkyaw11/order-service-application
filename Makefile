@@ -26,3 +26,5 @@ logs:
 
 smoke-test:
 	./scripts/smoke_test.sh
+	
+#
