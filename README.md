@@ -80,18 +80,18 @@ profile; omit it when the default AWS credentials are already configured.
 
 ## Delivery branches
 
-Feature branches are merged into `develop` through a pull request. Pull requests run linting and
-tests but do not publish an image or deploy. A push to `develop` publishes the full Git commit SHA
+Feature branches are merged into `development` through a pull request. Pull requests run linting and
+tests but do not publish an image or deploy. A push to `development` publishes the full Git commit SHA
 to the development ECR repository and automatically deploys the dev ECS services.
 
-Production changes move from `develop` to `main` through a reviewed pull request. A push to `main`
+Production changes move from `development` to `main` through a reviewed pull request. A push to `main`
 runs the tests and then pauses at the protected GitHub `prod` environment. After a required reviewer
 approves the job, GitHub assumes the production OIDC role, publishes the exact commit image to the
 production ECR repository, runs the migration, and deploys the production worker and API services.
 
 ```text
-feature/* -> pull request -> develop -> automatic dev deployment
-develop   -> pull request -> main    -> approval -> production deployment
+feature/*  -> pull request -> development -> automatic dev deployment
+development -> pull request -> main      -> approval -> production deployment
 ```
 
 Configure repository variables `AWS_DEV_ROLE_ARN` and `AWS_PROD_ROLE_ARN`. Create a GitHub
