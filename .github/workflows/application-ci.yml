@@ -1,6 +1,8 @@
 name: Application CI
 
+# Start this workflow for pull requests, branch pushes, or a manual run from the Actions page.
 on:
+  # Pull requests only test the code. They do not publish an image or deploy.
   pull_request:
     branches:
       - development
@@ -9,43 +11,65 @@ on:
     branches:
       - development
       - main
+  # Adds the "Run workflow" button in GitHub Actions.
   workflow_dispatch:
 
+# Only one workflow for the same branch should deploy at a time.
+# A newer run waits because cancel-in-progress is false; it does not cancel the older deployment.
 concurrency:
   group: application-ci-${{ github.ref }}
   cancel-in-progress: false
 
+# Default permission for all jobs. Jobs that need AWS OIDC add id-token: write below.
 permissions:
   contents: read
 
+# Values shared by every job.
+# github.sha is the full Git commit ID, for example: 24ec2e612345... .
+# It gives every image an immutable tag that identifies the exact source code.
 env:
-  AWS_ACCOUNT_ID: "499193102935"
+  # Non-secret repository variables configured in GitHub Settings > Actions > Variables.
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
   AWS_REGION: us-east-1
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
+  # JOB 1: Build a test container and check the application code.
+  # Output: a green or failed "Lint and test" job. Nothing is pushed to AWS.
   test:
     name: Lint and test
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
+      # Download this Git commit onto the temporary GitHub runner.
+      # Output: the repository files are available in GITHUB_WORKSPACE.
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          # Do not leave a reusable GitHub credential inside the checked-out repository.
           persist-credentials: false
 
+      # Build the Dockerfile's development stage, which includes Ruff and pytest.
+      # Output example: local image order-service-test:24ec2e6... on the runner only.
       - name: Build test image
         run: docker build --target development --tag order-service-test:${GITHUB_SHA} .
 
+      # Ruff checks Python errors and verifies that files use the expected formatting.
+      # Output: "All checks passed!" when both commands succeed.
       - name: Check lint and formatting
         run: |
           docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} ruff check .
           docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} ruff format --check .
 
+      # Run fast unit tests inside the same test image.
+      # Output example: "7 passed". A failed test stops the workflow.
       - name: Run unit tests
         run: docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} pytest -q -p no:cacheprovider tests
 
+  # JOB 2: Publish the development image to ECR.
+  # It only runs after tests pass on a push/manual run of the development branch.
+  # Pull requests skip this job, so unmerged code cannot be deployed.
   publish-dev:
     name: Build and push development image
     if: github.ref == 'refs/heads/development' && github.event_name != 'pull_request'
@@ -54,29 +78,42 @@ jobs:
     timeout-minutes: 20
 
     env:
-      ECR_REPOSITORY: order-service-dev
+      # Development and production use different ECR repositories.
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY_DEV }}
 
     permissions:
       contents: read
+      # Required to request a short-lived GitHub OIDC token for AWS. No AWS access keys are stored.
       id-token: write
 
     steps:
+      # This is a new GitHub runner, so it must download the repository again.
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
 
+      # Exchange GitHub's OIDC token for temporary credentials for the development IAM role.
+      # Output: AWS_ACCESS_KEY_ID and other temporary values are available to later steps,
+      # but GitHub masks their values in the log.
       - name: Assume development AWS role
         uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
         with:
+          # Repository variable configured in GitHub Settings > Actions > Variables.
           role-to-assume: ${{ vars.AWS_DEV_ROLE_ARN }}
           role-session-name: github-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
+          # Safety check: fail if the assumed role belongs to another AWS account.
           allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
 
+      # Get a temporary Docker login token for the AWS ECR registry.
+      # Output: "Login Succeeded".
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
+      # Avoid rebuilding and pushing when this exact Git SHA already exists in ECR.
+      # GITHUB_OUTPUT passes sha_exists and bootstrap_exists to later steps.
+      # Output example: sha_exists=false and bootstrap_exists=true (not secret values).
       - name: Check whether image already exists
         id: image
         run: |
@@ -91,12 +128,17 @@ jobs:
             echo "bootstrap_exists=false" >> "${GITHUB_OUTPUT}"
           fi
 
+      # Build the production/runtime image only when its immutable SHA tag is missing.
+      # IMAGE_VERSION is written into the image for startup-log diagnosis.
+      # Output example: <account>.dkr.ecr.<region>.amazonaws.com/<repository>:<git-sha>
       - name: Build image
         if: steps.image.outputs.sha_exists != 'true'
         env:
           IMAGE_URI: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
         run: docker build --build-arg IMAGE_VERSION="${GITHUB_SHA}" --tag "${IMAGE_URI}" .
 
+      # Upload the newly built image layers and SHA tag to development ECR.
+      # Output: the published image URI appears in the GitHub run summary.
       - name: Push image
         if: steps.image.outputs.sha_exists != 'true'
         env:
@@ -105,6 +147,9 @@ jobs:
           docker push "${IMAGE_URI}"
           echo "Published \`${IMAGE_URI}\`" >> "${GITHUB_STEP_SUMMARY}"
 
+      # Terraform initially creates ECS task definitions that reference the bootstrap tag.
+      # This step creates that tag once. Later deployments use immutable Git SHA tags.
+      # Output: order-service-dev:bootstrap exists in ECR. This step is skipped after that.
       - name: Publish initial bootstrap image
         if: steps.image.outputs.bootstrap_exists != 'true'
         env:
@@ -117,6 +162,8 @@ jobs:
           docker push "${REGISTRY_URI}:bootstrap"
           echo "Published initial \`${REGISTRY_URI}:bootstrap\`" >> "${GITHUB_STEP_SUMMARY}"
 
+  # JOB 3: Deploy the development image after publish-dev succeeds.
+  # Output: new API and worker task-definition revisions running the Git SHA image.
   deploy-dev:
     name: Deploy development to ECS
     if: github.ref == 'refs/heads/development' && github.event_name != 'pull_request'
@@ -126,22 +173,25 @@ jobs:
 
     permissions:
       contents: read
+      # Needed again because every job has a new runner and must assume AWS separately.
       id-token: write
 
     env:
-      ECS_CLUSTER: order-service-dev-cluster
-      API_SERVICE: order-service-dev-api
-      WORKER_SERVICE: order-service-dev-worker
-      MIGRATION_TASK_FAMILY: order-service-dev-migration
-      IMAGE_URI: 499193102935.dkr.ecr.us-east-1.amazonaws.com/order-service-dev:${{ github.sha }}
+      # deploy_ecs.sh reads these values to find the correct ECS services and image.
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER_DEV }}
+      API_SERVICE: ${{ vars.API_SERVICE_DEV }}
+      WORKER_SERVICE: ${{ vars.WORKER_SERVICE_DEV }}
+      IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_DEV }}:${{ github.sha }}
       DEPLOY_ENV: dev
 
     steps:
+      # Download deploy_ecs.sh onto this job's runner.
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
 
+      # Get temporary AWS credentials with permission to register task definitions and update ECS.
       - name: Assume development AWS role
         uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
         with:
@@ -150,39 +200,51 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
 
-      - name: Run migration and deploy ECS services
+      # Register API and worker task-definition revisions using IMAGE_URI, update both ECS
+      # services, wait for them to become stable, and check that ECS did not roll back.
+      # Output: "Deployment complete: <IMAGE_URI>" plus task ARNs in the run summary.
+      # Each new task first runs its migration init container. API/worker starts only after success.
+      - name: Deploy ECS services
         run: ./scripts/deploy_ecs.sh
 
+  # JOB 4: Build, publish, and deploy production.
+  # Current condition means this only runs when "Run workflow" is used on the main branch.
   release-prod:
     name: Approve and deploy production to ECS
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Use the condition below if production should also start automatically after a push to main:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     # GitHub pauses this job until an approved reviewer allows the prod environment deployment.
+    # This requires a required reviewer on the GitHub environment named "prod".
     environment:
       name: prod
 
     permissions:
       contents: read
+      # Allows this job to request an OIDC token for the separate production IAM role.
       id-token: write
 
     env:
-      ECR_REPOSITORY: order-service-prod
-      ECS_CLUSTER: order-service-prod-cluster
-      API_SERVICE: order-service-prod-api
-      WORKER_SERVICE: order-service-prod-worker
-      MIGRATION_TASK_FAMILY: order-service-prod-migration
-      IMAGE_URI: 499193102935.dkr.ecr.us-east-1.amazonaws.com/order-service-prod:${{ github.sha }}
+      # Production has its own ECR repository, ECS cluster, and ECS services.
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY_PROD }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER_PROD }}
+      API_SERVICE: ${{ vars.API_SERVICE_PROD }}
+      WORKER_SERVICE: ${{ vars.WORKER_SERVICE_PROD }}
+      IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_PROD }}:${{ github.sha }}
       DEPLOY_ENV: prod
 
     steps:
+      # Download the exact main-branch commit selected for production.
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
 
+      # After human approval, get temporary credentials for the production AWS role.
+      # Output: temporary credentials are configured and their values remain masked.
       - name: Assume production AWS role after approval
         uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
         with:
@@ -191,9 +253,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
 
+      # Allow Docker on the runner to push the production image to ECR.
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
+      # If this commit was already published, reuse it instead of rebuilding it.
+      # Output: prod-image.outputs.sha_exists is true or false.
       - name: Check whether production image already exists
         id: prod-image
         run: |
@@ -203,15 +268,21 @@ jobs:
             echo "sha_exists=false" >> "${GITHUB_OUTPUT}"
           fi
 
+      # Build a runtime image tagged with the exact production Git commit.
+      # This step is skipped if that SHA tag already exists in production ECR.
       - name: Build production image
         if: steps.prod-image.outputs.sha_exists != 'true'
         run: docker build --build-arg IMAGE_VERSION="${GITHUB_SHA}" --tag "${IMAGE_URI}" .
 
+      # Upload the production image and show its immutable URI in the run summary.
       - name: Push production image
         if: steps.prod-image.outputs.sha_exists != 'true'
         run: |
           docker push "${IMAGE_URI}"
           echo "Published production image \`${IMAGE_URI}\`" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Run production migration and deploy ECS services
+      # Update production API and worker, wait for stable services, and verify the new
+      # task definitions are running. ECS circuit breaker handles an unhealthy revision.
+      # Each new task first runs its migration init container and waits for a successful exit.
+      - name: Deploy production ECS services
         run: ./scripts/deploy_ecs.sh

@@ -87,16 +87,35 @@ to the development ECR repository and automatically deploys the dev ECS services
 Production changes move from `development` to `main` through a reviewed pull request. A push to `main`
 runs the tests and then pauses at the protected GitHub `prod` environment. After a required reviewer
 approves the job, GitHub assumes the production OIDC role, publishes the exact commit image to the
-production ECR repository, runs the migration, and deploys the production worker and API services.
+production ECR repository, and deploys the production worker and API services.
 
 ```text
 feature/*  -> pull request -> development -> automatic dev deployment
 development -> pull request -> main      -> approval -> production deployment
 ```
 
-Configure repository variables `AWS_DEV_ROLE_ARN` and `AWS_PROD_ROLE_ARN`. Create a GitHub
-environment named `prod` and add a required reviewer. Protect `main` so changes require an approved
-pull request and passing CI checks.
+Configure these non-secret repository variables under GitHub **Settings > Secrets and variables >
+Actions > Variables**:
+
+| Variable | Example value |
+| --- | --- |
+| `AWS_ACCOUNT_ID` | `499193102935` |
+| `ECR_REPOSITORY_DEV` | `order-service-dev` |
+| `ECR_REPOSITORY_PROD` | `order-service-prod` |
+| `ECS_CLUSTER_DEV` | `order-service-dev-cluster` |
+| `API_SERVICE_DEV` | `order-service-dev-api` |
+| `WORKER_SERVICE_DEV` | `order-service-dev-worker` |
+| `ECS_CLUSTER_PROD` | `order-service-prod-cluster` |
+| `API_SERVICE_PROD` | `order-service-prod-api` |
+| `WORKER_SERVICE_PROD` | `order-service-prod-worker` |
+| `AWS_DEV_ROLE_ARN` | `arn:aws:iam::499193102935:role/order-service-dev-github-actions` |
+| `AWS_PROD_ROLE_ARN` | `arn:aws:iam::499193102935:role/order-service-prod-github-actions` |
+
+These are names and ARNs, not passwords, so repository variables are appropriate. The workflow uses
+OIDC to obtain temporary AWS credentials; do not add permanent AWS access keys.
+
+Create a GitHub environment named `prod` and add a required reviewer. Protect `main` so changes
+require an approved pull request and passing CI checks.
 
 ECS uses rolling deployments and the Terraform-managed deployment circuit breaker. If new tasks
 cannot become healthy, ECS rolls back to the last successful revision and the workflow fails. The
@@ -105,7 +124,17 @@ access uses the environment-specific GitHub role variables and OIDC instead of s
 
 Dependencies are fully pinned in `requirements.txt` and `requirements-dev.txt`. The SQL migration
 runner records applied files in `schema_migrations`; Compose completes migrations before starting
-the API and worker.
+the API and worker. On ECS, each API and worker task first runs the same image as a non-essential
+migration init container. The main container depends on its successful exit, so application code
+starts only after the schema is ready. PostgreSQL advisory locking serializes concurrent task starts,
+and already-applied migration filenames are skipped. A schema change must use a new numbered SQL file;
+editing an already-applied file does not re-run it. `scripts/run_migration.sh` remains available for
+manual recovery and troubleshooting.
+
+When Terraform changes the structure of an ECS task definition, apply the infrastructure first. The
+next application deployment reads the latest active API and worker task-family revisions, replaces
+both the main and migration-container images with the immutable Git SHA image, and updates the ECS
+services.
 
 `make test` runs isolated API and worker unit tests. The real integration test is skipped there and
 is enabled only by `make integration-test`; that command starts the Compose dependencies and proves
