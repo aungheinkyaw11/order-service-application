@@ -3,11 +3,11 @@ name: Application CI
 on:
   pull_request:
     branches:
-      - develop
+      - development
       - main
   push:
     branches:
-      - develop
+      - development
       - main
   workflow_dispatch:
 
@@ -48,7 +48,7 @@ jobs:
 
   publish-dev:
     name: Build and push development image
-    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/development' && github.event_name != 'pull_request'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -119,7 +119,7 @@ jobs:
 
   deploy-dev:
     name: Deploy development to ECS
-    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/development' && github.event_name != 'pull_request'
     needs: publish-dev
     runs-on: ubuntu-latest
     timeout-minutes: 30
