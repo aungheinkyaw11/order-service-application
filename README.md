@@ -1,12 +1,12 @@
 # Trading Order Service
 
-This is a minimal FastAPI order API backed by PostgreSQL and NATS JetStream. A separate
-worker consumes durable messages and changes orders from `pending` to `filled` after two seconds.
+This is a minimal FastAPI order API backed by PostgreSQL and NATS JetStream. 
+A separate worker consumes messages and changes orders from `pending` to `filled` after two seconds.
 
 ```text
 POST /orders -> PostgreSQL (pending) -> NATS JetStream -> worker -> PostgreSQL (filled)
 ```
-
+---
 ## Component guide
 
 - `app/api.py` owns the HTTP endpoints, request IDs, and dependency lifecycle.
@@ -16,13 +16,7 @@ POST /orders -> PostgreSQL (pending) -> NATS JetStream -> worker -> PostgreSQL (
 - `app/logging.py` emits one-line JSON logs for CloudWatch-compatible ingestion.
 - `compose.yaml` runs PostgreSQL, NATS, migrations, the API, and the worker locally.
 
-## Prerequisites
-
-- Docker with Docker Compose
-- `make`, `curl`, and Python 3 (only used by the smoke-test script for JSON parsing)
-
-No host Python environment is required. The application and test images use Python 3.12.
-
+---
 ## Run locally
 
 ```sh
