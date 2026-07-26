@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-required=(AWS_REGION IMAGE_URI ECS_CLUSTER API_SERVICE WORKER_SERVICE MIGRATION_TASK_FAMILY) # check required values
+required=(AWS_REGION IMAGE_URI ECS_CLUSTER API_SERVICE WORKER_SERVICE) # check required values
 for name in "${required[@]}"; do
   if [[ -z "${!name:-}" ]]; then
     echo "Missing required environment variable: ${name}" >&2
@@ -34,7 +34,7 @@ register_with_image() {
             .deregisteredAt
           )
         | .containerDefinitions |= map(
-            if .name == $container then .image = $image else . end
+            if (.name == $container or .name == "migration") then .image = $image else . end
           )) as $definition
       | $definition + {tags: (.tags // [])}
     ' >"${output_file}"
@@ -55,40 +55,16 @@ if [[ "$(jq '.failures | length' <<<"${service_details}")" -ne 0 ]]; then
   exit 1
 fi
 
-current_api_task="$(jq -r --arg service "${API_SERVICE}" '.services[] | select(.serviceName == $service) | .taskDefinition' <<<"${service_details}")"
-current_worker_task="$(jq -r --arg service "${WORKER_SERVICE}" '.services[] | select(.serviceName == $service) | .taskDefinition' <<<"${service_details}")"
-api_network="$(jq -c --arg service "${API_SERVICE}" '.services[] | select(.serviceName == $service) | .networkConfiguration' <<<"${service_details}")"
+# Use the latest active revision in each task family. Terraform can add structural changes,
+# such as the migration init container, while this script replaces its image and deploys it.
+api_task_family="$(jq -r --arg service "${API_SERVICE}" '.services[] | select(.serviceName == $service) | .taskDefinition | split("/")[-1] | split(":")[0]' <<<"${service_details}")"
+worker_task_family="$(jq -r --arg service "${WORKER_SERVICE}" '.services[] | select(.serviceName == $service) | .taskDefinition | split("/")[-1] | split(":")[0]' <<<"${service_details}")"
 
-api_task="$(register_with_image "${current_api_task}" api)"
-worker_task="$(register_with_image "${current_worker_task}" worker)"
-migration_task="$(register_with_image "${MIGRATION_TASK_FAMILY}" migration)"
+api_task="$(register_with_image "${api_task_family}" api)"
+worker_task="$(register_with_image "${worker_task_family}" worker)"
 
 echo "Registered API task: ${api_task}"
 echo "Registered worker task: ${worker_task}"
-echo "Registered migration task: ${migration_task}"
-
-# run the migration first
-migration_result="$(aws ecs run-task \
-  --cluster "${ECS_CLUSTER}" \
-  --task-definition "${migration_task}" \
-  --launch-type FARGATE \
-  --network-configuration "${api_network}")"
-
-if [[ "$(jq '.failures | length' <<<"${migration_result}")" -ne 0 ]]; then
-  jq '.failures' <<<"${migration_result}" >&2
-  exit 1
-fi
-
-migration_arn="$(jq -r '.tasks[0].taskArn' <<<"${migration_result}")"
-echo "Waiting for migration task: ${migration_arn}"
-aws ecs wait tasks-stopped --cluster "${ECS_CLUSTER}" --tasks "${migration_arn}"
-
-migration_description="$(aws ecs describe-tasks --cluster "${ECS_CLUSTER}" --tasks "${migration_arn}")"
-migration_exit="$(jq -r '.tasks[0].containers[0].exitCode // -1' <<<"${migration_description}")"
-if [[ "${migration_exit}" != "0" ]]; then
-  jq '.tasks[0] | {stoppedReason, containers: [.containers[] | {name, exitCode, reason}]}' <<<"${migration_description}" >&2
-  exit 1
-fi
 
 # update both ECS services
 aws ecs update-service --cluster "${ECS_CLUSTER}" --service "${WORKER_SERVICE}" --task-definition "${worker_task}" >/dev/null
@@ -134,6 +110,5 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- Image: \`${IMAGE_URI}\`"
     echo "- API task: \`${api_task}\`"
     echo "- Worker task: \`${worker_task}\`"
-    echo "- Migration task: \`${migration_task}\` (exit 0)"
   } >>"${GITHUB_STEP_SUMMARY}"
 fi

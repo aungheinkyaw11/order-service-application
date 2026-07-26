@@ -1,12 +1,12 @@
 # Trading Order Service
 
-This is a minimal FastAPI order API backed by PostgreSQL and NATS JetStream. A separate
-worker consumes durable messages and changes orders from `pending` to `filled` after two seconds.
+This is a minimal FastAPI order API backed by PostgreSQL and NATS JetStream. 
+A separate worker consumes messages and changes orders from `pending` to `filled` after two seconds.
 
 ```text
 POST /orders -> PostgreSQL (pending) -> NATS JetStream -> worker -> PostgreSQL (filled)
 ```
-
+---
 ## Component guide
 
 - `app/api.py` owns the HTTP endpoints, request IDs, and dependency lifecycle.
@@ -16,87 +16,48 @@ POST /orders -> PostgreSQL (pending) -> NATS JetStream -> worker -> PostgreSQL (
 - `app/logging.py` emits one-line JSON logs for CloudWatch-compatible ingestion.
 - `compose.yaml` runs PostgreSQL, NATS, migrations, the API, and the worker locally.
 
-## Prerequisites
-
-- Docker with Docker Compose
-- `make`, `curl`, and Python 3 (only used by the smoke-test script for JSON parsing)
-
-No host Python environment is required. The application and test images use Python 3.12.
-
+---
 ## Run locally
+To run in your local, please follow this [link](docs/run_locally.md)
 
-```sh
-cp .env.example .env
-make start
-docker compose ps
-make smoke-test
-```
-
-The API listens on <http://localhost:8000>. Follow correlated JSON application logs with:
-
-```sh
-make logs
-```
-
-Stop containers with `make stop`. To also delete local PostgreSQL and JetStream data, run
-`docker compose down --volumes` explicitly.
-
-Expected smoke-test behavior is an initial `pending` order followed by `filled` after roughly two
-seconds. Its final section prints API and worker log lines sharing the same request ID.
-
-## API
-
-```sh
-curl -i http://localhost:8000/health
-curl -i http://localhost:8000/ready
-curl -i -X POST http://localhost:8000/orders \
-  -H 'Content-Type: application/json' \
-  -H 'X-Request-ID: 48af2fc4-5042-4f01-ad5b-e4f6f51a56c9' \
-  -d '{"symbol":"AAPL","quantity":5}'
-curl -i http://localhost:8000/orders/ORDER_ID
-```
-
-`X-Request-ID` must be a UUID. The API preserves a valid value or creates a new UUID, returns it
-in the response, publishes it in the JetStream message, and includes it in API and worker logs.
-
-## Development checks
-
-```sh
-make test
-make integration-test
-make lint
-make format
-```
-
-Run an existing ECS migration task manually without exporting resource names:
-
-```sh
-./scripts/run_migration.sh dev aunghein
-./scripts/run_migration.sh prod aunghein
-```
-
-The first argument selects the environment. The optional second argument is the local AWS CLI
-profile; omit it when the default AWS credentials are already configured.
-
+---
 ## Delivery branches
 
-Feature branches are merged into `development` through a pull request. Pull requests run linting and
-tests but do not publish an image or deploy. A push to `development` publishes the full Git commit SHA
+Feature branches are merged into `development` through a pull request. Pull requests run linting and tests but do not publish an image or deploy. A push to `development` publishes the full Git commit SHA
 to the development ECR repository and automatically deploys the dev ECS services.
 
 Production changes move from `development` to `main` through a reviewed pull request. A push to `main`
 runs the tests and then pauses at the protected GitHub `prod` environment. After a required reviewer
 approves the job, GitHub assumes the production OIDC role, publishes the exact commit image to the
-production ECR repository, runs the migration, and deploys the production worker and API services.
+production ECR repository, and deploys the production worker and API services.
 
 ```text
 feature/*  -> pull request -> development -> automatic dev deployment
 development -> pull request -> main      -> approval -> production deployment
 ```
 
-Configure repository variables `AWS_DEV_ROLE_ARN` and `AWS_PROD_ROLE_ARN`. Create a GitHub
-environment named `prod` and add a required reviewer. Protect `main` so changes require an approved
-pull request and passing CI checks.
+Configure these non-secret repository variables under GitHub **Settings > Secrets and variables >
+Actions > Variables**:
+
+| Variable | Example value |
+| --- | --- |
+| `AWS_ACCOUNT_ID` | `499193102935` |
+| `ECR_REPOSITORY_DEV` | `order-service-dev` |
+| `ECR_REPOSITORY_PROD` | `order-service-prod` |
+| `ECS_CLUSTER_DEV` | `order-service-dev-cluster` |
+| `API_SERVICE_DEV` | `order-service-dev-api` |
+| `WORKER_SERVICE_DEV` | `order-service-dev-worker` |
+| `ECS_CLUSTER_PROD` | `order-service-prod-cluster` |
+| `API_SERVICE_PROD` | `order-service-prod-api` |
+| `WORKER_SERVICE_PROD` | `order-service-prod-worker` |
+| `AWS_DEV_ROLE_ARN` | `arn:aws:iam::499193102935:role/order-service-dev-github-actions` |
+| `AWS_PROD_ROLE_ARN` | `arn:aws:iam::499193102935:role/order-service-prod-github-actions` |
+
+These are names and ARNs, not passwords, so repository variables are appropriate. The workflow uses
+OIDC to obtain temporary AWS credentials; do not add permanent AWS access keys.
+
+Create a GitHub environment named `prod` and add a required reviewer. Protect `main` so changes
+require an approved pull request and passing CI checks.
 
 ECS uses rolling deployments and the Terraform-managed deployment circuit breaker. If new tasks
 cannot become healthy, ECS rolls back to the last successful revision and the workflow fails. The
@@ -105,7 +66,17 @@ access uses the environment-specific GitHub role variables and OIDC instead of s
 
 Dependencies are fully pinned in `requirements.txt` and `requirements-dev.txt`. The SQL migration
 runner records applied files in `schema_migrations`; Compose completes migrations before starting
-the API and worker.
+the API and worker. On ECS, each API and worker task first runs the same image as a non-essential
+migration init container. The main container depends on its successful exit, so application code
+starts only after the schema is ready. PostgreSQL advisory locking serializes concurrent task starts,
+and already-applied migration filenames are skipped. A schema change must use a new numbered SQL file;
+editing an already-applied file does not re-run it. `scripts/run_migration.sh` remains available for
+manual recovery and troubleshooting.
+
+When Terraform changes the structure of an ECS task definition, apply the infrastructure first. The
+next application deployment reads the latest active API and worker task-family revisions, replaces
+both the main and migration-container images with the immutable Git SHA image, and updates the ECS
+services.
 
 `make test` runs isolated API and worker unit tests. The real integration test is skipped there and
 is enabled only by `make integration-test`; that command starts the Compose dependencies and proves
