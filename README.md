@@ -18,64 +18,12 @@ POST /orders -> PostgreSQL (pending) -> NATS JetStream -> worker -> PostgreSQL (
 
 ---
 ## Run locally
+To run in your local, please follow this [link](docs/run_locally.md)
 
-```sh
-cp .env.example .env
-make start
-docker compose ps
-make smoke-test
-```
-
-The API listens on <http://localhost:8000>. Follow correlated JSON application logs with:
-
-```sh
-make logs
-```
-
-Stop containers with `make stop`. To also delete local PostgreSQL and JetStream data, run
-`docker compose down --volumes` explicitly.
-
-Expected smoke-test behavior is an initial `pending` order followed by `filled` after roughly two
-seconds. Its final section prints API and worker log lines sharing the same request ID.
-
-## API
-
-```sh
-curl -i http://localhost:8000/health
-curl -i http://localhost:8000/ready
-curl -i -X POST http://localhost:8000/orders \
-  -H 'Content-Type: application/json' \
-  -H 'X-Request-ID: 48af2fc4-5042-4f01-ad5b-e4f6f51a56c9' \
-  -d '{"symbol":"AAPL","quantity":5}'
-curl -i http://localhost:8000/orders/ORDER_ID
-```
-
-`X-Request-ID` must be a UUID. The API preserves a valid value or creates a new UUID, returns it
-in the response, publishes it in the JetStream message, and includes it in API and worker logs.
-
-## Development checks
-
-```sh
-make test
-make integration-test
-make lint
-make format
-```
-
-Run an existing ECS migration task manually without exporting resource names:
-
-```sh
-./scripts/run_migration.sh dev aunghein
-./scripts/run_migration.sh prod aunghein
-```
-
-The first argument selects the environment. The optional second argument is the local AWS CLI
-profile; omit it when the default AWS credentials are already configured.
-
+---
 ## Delivery branches
 
-Feature branches are merged into `development` through a pull request. Pull requests run linting and
-tests but do not publish an image or deploy. A push to `development` publishes the full Git commit SHA
+Feature branches are merged into `development` through a pull request. Pull requests run linting and tests but do not publish an image or deploy. A push to `development` publishes the full Git commit SHA
 to the development ECR repository and automatically deploys the dev ECS services.
 
 Production changes move from `development` to `main` through a reviewed pull request. A push to `main`

@@ -1,0 +1,35 @@
+# Local environment configuration can contain passwords and must not be committed.
+.env
+.env.*
+!.env.example
+
+# Python virtual environments are machine-specific and can be recreated.
+.venv/
+venv/
+
+# Python generates bytecode and cache directories while the application runs.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test, lint, type-checking, and coverage tools generate these local results.
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Python packaging commands generate these build artifacts.
+build/
+dist/
+*.egg-info/
+
+# Local logs are runtime output and belong in stdout or CloudWatch, not Git.
+*.log
+
+# Editor and operating-system settings should remain local to each engineer.
+.idea/
+.vscode/
+.DS_Store
