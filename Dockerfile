@@ -31,3 +31,4 @@ COPY --chown=app:app migrations ./migrations
 USER app
 EXPOSE 8000
 CMD ["python", "-m", "app.api_entrypoint"]
+#
