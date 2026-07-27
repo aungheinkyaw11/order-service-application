@@ -78,6 +78,7 @@ Actions > Variables**:
 | Variable | Example value |
 | --- | --- |
 | `AWS_ACCOUNT_ID` | `499193102935` |
+| `AWS_REGION` | `us-east-1` |
 | `ECR_REPOSITORY_DEV` | `order-service-dev` |
 | `ECR_REPOSITORY_PROD` | `order-service-prod` |
 | `ECS_CLUSTER_DEV` | `order-service-dev-cluster` |

@@ -30,7 +30,7 @@ permissions:
 env:
   # Non-secret repository variables configured in GitHub Settings > Actions > Variables.
   AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
-  AWS_REGION: us-east-1
+  AWS_REGION: ${{ vars.AWS_REGION }}
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
@@ -53,19 +53,19 @@ jobs:
       # Build the Dockerfile's development stage, which includes Ruff and pytest.
       # Output example: local image order-service-test:24ec2e6... on the runner only.
       - name: Build test image
-        run: docker build --target development --tag order-service-test:${GITHUB_SHA} .
+        run: docker build --target development --tag "order-service-test:${GITHUB_SHA}" .
 
       # Ruff checks Python errors and verifies that files use the expected formatting.
       # Output: "All checks passed!" when both commands succeed.
       - name: Check lint and formatting
         run: |
-          docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} ruff check .
-          docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} ruff format --check .
+          docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src "order-service-test:${GITHUB_SHA}" ruff check .
+          docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src "order-service-test:${GITHUB_SHA}" ruff format --check .
 
       # Run fast unit tests inside the same test image.
       # Output example: "7 passed". A failed test stops the workflow.
       - name: Run unit tests
-        run: docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src order-service-test:${GITHUB_SHA} pytest -q -p no:cacheprovider tests
+        run: docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src "order-service-test:${GITHUB_SHA}" pytest -q -p no:cacheprovider tests
 
   # JOB 2: Publish the development image to ECR.
   # It only runs after tests pass on a push/manual run of the development branch.
@@ -181,7 +181,7 @@ jobs:
       ECS_CLUSTER: ${{ vars.ECS_CLUSTER_DEV }}
       API_SERVICE: ${{ vars.API_SERVICE_DEV }}
       WORKER_SERVICE: ${{ vars.WORKER_SERVICE_DEV }}
-      IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_DEV }}:${{ github.sha }}
+      IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_DEV }}:${{ github.sha }}
       DEPLOY_ENV: dev
 
     steps:
@@ -233,7 +233,7 @@ jobs:
       ECS_CLUSTER: ${{ vars.ECS_CLUSTER_PROD }}
       API_SERVICE: ${{ vars.API_SERVICE_PROD }}
       WORKER_SERVICE: ${{ vars.WORKER_SERVICE_PROD }}
-      IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_PROD }}:${{ github.sha }}
+      IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_PROD }}:${{ github.sha }}
       DEPLOY_ENV: prod
 
     steps:
