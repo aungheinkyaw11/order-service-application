@@ -88,3 +88,17 @@ Actions > Variables**:
 | `WORKER_SERVICE_PROD` | `order-service-prod-worker` |
 | `AWS_DEV_ROLE_ARN` | `arn:aws:iam::499193102935:role/order-service-dev-github-actions` |
 | `AWS_PROD_ROLE_ARN` | `arn:aws:iam::499193102935:role/order-service-prod-github-actions` |
+
+---
+## Application processes and endpoints
+
+The project uses one Docker image for three separate processes. Each process uses a different
+Python module command:
+
+| Process   | Command                        | Purpose                                                                                |
+| --------- | ------------------------------ | -------------------------------------------------------------------------------------- |
+| Migration | `python -m app.migrate`        | Applies unapplied SQL files from the `migrations/` directory to PostgreSQL.            |
+| API       | `python -m app.api_entrypoint` | Starts Uvicorn and serves the FastAPI application from `app.api:app` on port `8000`.   |
+| Worker    | `python -m app.worker`         | Consumes order messages from NATS JetStream and updates PostgreSQL orders to `filled`. |
+
+---
