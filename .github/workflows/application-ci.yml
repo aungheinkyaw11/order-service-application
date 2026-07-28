@@ -67,6 +67,8 @@ jobs:
       - name: Run unit tests
         run: docker run --rm --volume "${GITHUB_WORKSPACE}:/src" --workdir /src "order-service-test:${GITHUB_SHA}" pytest -q -p no:cacheprovider tests
 
+
+        
   # JOB 2: Publish the development image to ECR.
   # It only runs after tests pass on a push/manual run of the development branch.
   # Pull requests skip this job, so unmerged code cannot be deployed.
@@ -162,6 +164,8 @@ jobs:
           docker push "${REGISTRY_URI}:bootstrap"
           echo "Published initial \`${REGISTRY_URI}:bootstrap\`" >> "${GITHUB_STEP_SUMMARY}"
 
+
+
   # JOB 3: Deploy the development image after publish-dev succeeds.
   # Output: new API and worker task-definition revisions running the Git SHA image.
   deploy-dev:
@@ -206,6 +210,8 @@ jobs:
       # Each new task first runs its migration init container. API/worker starts only after success.
       - name: Deploy ECS services
         run: ./scripts/deploy_ecs.sh
+
+
 
   # JOB 4: Build, publish, and deploy production.
   # Current condition means this only runs when "Run workflow" is used on the main branch.
