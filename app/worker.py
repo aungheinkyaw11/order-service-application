@@ -92,6 +92,7 @@ async def run() -> None:
             ack_policy=AckPolicy.EXPLICIT,
             ack_wait=30,
             deliver_policy=DeliverPolicy.ALL,
+            max_demax_deliver=5,
         ),
     )
     log_event(
